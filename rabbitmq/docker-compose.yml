@@ -1,0 +1,49 @@
+services:
+  init:
+    image: alpine:3.20
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/rabbitmq-data:/mnt/rabbitmq-data
+    command: >
+      sh -euxc '
+        mkdir -p /mnt/rabbitmq-data;
+        chown -R 999:999 /mnt/rabbitmq-data;
+        chmod 0750 /mnt/rabbitmq-data;
+      '
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+      TZ: ${TZ:-Europe/Madrid}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/rabbitmq-data:/var/lib/rabbitmq
+    #ports:
+    #  - "5672:5672"   # AMQP
+    #  - "15672:15672" # Management UI
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rabbitmq.rule=Host(`rabbitmq.tecnoia.cloud`)"
+      - "traefik.http.routers.rabbitmq.entrypoints=websecure"
+      - "traefik.http.routers.rabbitmq.tls.certresolver=letsencrypt-cloudflare"
+      - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
+      - "traefik.docker.network=traefik-net"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  traefik-net:
+    external: true
+    name: traefik-net

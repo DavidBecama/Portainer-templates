@@ -1,0 +1,39 @@
+services:
+  init:
+    image: alpine:3.20
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/valkey-data:/mnt/valkey-data
+    command: >
+      sh -euxc '
+        mkdir -p /mnt/valkey-data;
+        chown -R 999:1000 /mnt/valkey-data;
+        chmod 0750 /mnt/valkey-data;
+      '
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: valkey
+    restart: unless-stopped
+    user: "999:1000"
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/valkey-data:/data
+    #ports:
+    #  - "6379:6379"
+    command: >
+      valkey-server
+      --save 60 1
+      --loglevel warning
+      --requirepass ${VALKEY_PASSWORD}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --pass $$VALKEY_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

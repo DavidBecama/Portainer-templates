@@ -1,0 +1,271 @@
+x-shared: &shared
+  restart: unless-stopped
+  image: n8nio/n8n:${N8N_VERSION}
+  volumes:
+    - ${BASE_PATH}/${APP_PATH}/n8n-data:/home/node/.n8n
+    - ${BASE_PATH}/${APP_PATH}/custom-nodes:/home/node/custom
+    - ${BASE_PATH}/${APP_PATH}/shared:/home/node/shared
+  depends_on:
+    n8n-valkey:
+      condition: service_healthy
+    n8n-db:
+      condition: service_healthy
+    init:
+      condition: service_completed_successfully
+
+x-shared-net: &shared-net
+  n8n-net:
+
+# Variables comunes para n8n-main y n8n-worker
+x-shared-env: &shared-env
+  # Database
+  DB_TYPE: postgresdb
+  DB_POSTGRESDB_DATABASE: ${DB_DATABASE:-n8n}
+  DB_POSTGRESDB_HOST: n8n-db
+  DB_POSTGRESDB_PORT: "${DB_PORT:-5432}"
+  DB_POSTGRESDB_USER: ${DB_USER:-n8n}
+  DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD:?database password required}
+  DB_POSTGRESDB_SCHEMA: public
+
+  # Queue configuration
+  EXECUTIONS_MODE: queue
+  QUEUE_BULL_REDIS_HOST: n8n-valkey
+  QUEUE_BULL_REDIS_PORT: "6379"
+  QUEUE_HEALTH_CHECK_ACTIVE: "true"
+
+  # Security & Encryption
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+  NODE_ENV: production
+  N8N_DIAGNOSTICS_ENABLED: "false"
+
+  # Task runners (broker en n8n)
+  N8N_RUNNERS_ENABLED: "true"
+  N8N_RUNNERS_MODE: external
+  N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN}
+  N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+  N8N_RUNNERS_BROKER_PORT: "5679"
+
+  # Python en Code node
+  N8N_NATIVE_PYTHON_RUNNER: "true"
+  N8N_PYTHON_ENABLED: "true"
+
+  # Community packages
+  N8N_COMMUNITY_PACKAGES_ENABLED: "true"
+
+  # Timezone
+  TZ: ${TZ:-Europe/Madrid}
+  GENERIC_TIMEZONE: ${TZ:-Europe/Madrid}
+
+  # (Opcional) Para depurar; quítalo cuando esté estable
+  N8N_RUNNERS_INSECURE_MODE: "true"
+
+# Variables comunes para contenedores n8nio/runners
+x-shared-runners-env: &shared-runners-env
+  N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN}
+  GENERIC_TIMEZONE: ${TZ:-Europe/Madrid}
+
+services:
+  # --------------------------------------------------
+  # INIT (one-shot, prepara carpetas y permisos)
+  # --------------------------------------------------
+  init:
+    image: alpine:3.20
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-n8n}:/mnt/app
+    command: >
+      sh -euxc '
+        mkdir -p \
+          /mnt/app/db-data \
+          /mnt/app/valkey-data \
+          /mnt/app/custom-nodes \
+          /mnt/app/n8n-data \
+          /mnt/app/shared;
+
+        # PostgreSQL 18-alpine -> postgres:postgres (UID/GID 70)
+        chown -R 70:70 /mnt/app/db-data;
+        chmod 0700 /mnt/app/db-data;
+
+        # Valkey
+        chown -R 999:999 /mnt/app/valkey-data;
+        chmod 0750 /mnt/app/valkey-data;
+
+        # n8n
+        chown -R 1000:1000 \
+          /mnt/app/n8n-data \
+          /mnt/app/custom-nodes \
+          /mnt/app/shared;
+        chmod 0750 \
+          /mnt/app/n8n-data \
+          /mnt/app/custom-nodes \
+          /mnt/app/shared;
+      '
+
+  n8n-valkey:
+    image: valkey/valkey:alpine
+    container_name: n8n-valkey
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-n8n}/valkey-data:/data
+    restart: unless-stopped
+    command: valkey-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - n8n-net
+
+  n8n-db:
+    image: docker.io/library/postgres:18-alpine
+    container_name: n8n-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-n8n}/db-data:/var/lib/postgresql
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_DB: ${DB_DATABASE}
+    networks:
+      - n8n-net
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  n8n-main:
+    <<: *shared
+    container_name: n8n-main
+    environment:
+      <<: *shared-env
+
+      # SMTP (solo main)
+      N8N_EMAIL_MODE: smtp
+      N8N_SMTP_SENDER: ${SMTP_SENDER}
+      N8N_SMTP_HOST: ${SMTP_HOST}
+      N8N_SMTP_PORT: ${SMTP_PORT}
+      N8N_SMTP_USER: ${SMTP_USER}
+      N8N_SMTP_PASS: ${SMTP_PASSWORD}
+      N8N_SMTP_SSL: ${SMTP_SSL}
+
+      # URLs y endpoints (solo main)
+      N8N_EDITOR_BASE_URL: https://${HOST:-n8n}.${DOMAIN}
+      N8N_ENDPOINT_WEBHOOK: v2
+      N8N_ENDPOINT_WEBHOOK_TEST: staging
+      WEBHOOK_URL: https://${HOST:-n8n}.${DOMAIN}
+
+      # Configuración específica de main
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "true"
+      N8N_PAYLOAD_SIZE_MAX: "16"
+      N8N_FORMDATA_FILE_SIZE_MAX: "16"
+      N8N_PROXY_HOPS: "1"
+      OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
+
+    networks:
+      <<: *shared-net
+      ingress-net:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls.certresolver=${CERT_RESOLVER}"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+
+  n8n-worker:
+    <<: *shared
+    container_name: n8n-worker
+    command: worker
+    environment:
+      <<: *shared-env
+    networks:
+      <<: *shared-net
+
+  # Runner para el broker del main (manual executions si alguna cae en main)
+  n8n-runners-main:
+    image: n8nio/runners:${N8N_VERSION}
+    container_name: n8n-runners-main
+    restart: unless-stopped
+    environment:
+      <<: *shared-runners-env
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n-main:5679
+    configs:
+      - source: n8n-task-runners
+        target: /etc/n8n-task-runners.json
+    depends_on:
+      - n8n-main
+    networks:
+      - n8n-net
+
+  # Runner para el broker del worker (donde deberían ejecutarse las tareas)
+  n8n-runners-worker:
+    image: n8nio/runners:${N8N_VERSION}
+    container_name: n8n-runners-worker
+    restart: unless-stopped
+    environment:
+      <<: *shared-runners-env
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n-worker:5679
+    configs:
+      - source: n8n-task-runners
+        target: /etc/n8n-task-runners.json
+    depends_on:
+      - n8n-worker
+    networks:
+      - n8n-net
+
+networks:
+  n8n-net:
+    driver: bridge
+    attachable: false
+    external: false
+    name: n8n-net
+  ingress-net:
+    external: true
+
+configs:
+  n8n-task-runners:
+    content: |
+      {
+        "task-runners": [
+          {
+            "runner-type": "javascript",
+            "workdir": "/home/runner",
+            "command": "/usr/local/bin/node",
+            "args": [
+              "--disallow-code-generation-from-strings",
+              "--disable-proto=delete",
+              "/opt/runners/task-runner-javascript/dist/start.js"
+            ],
+            "health-check-server-port": "5681",
+            "env-overrides": {
+              "NODE_FUNCTION_ALLOW_BUILTIN": "*",
+              "NODE_FUNCTION_ALLOW_EXTERNAL": "*",
+              "N8N_RUNNERS_TASK_TIMEOUT": "120",
+              "N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT": "600"
+            }
+          },
+          {
+            "runner-type": "python",
+            "workdir": "/home/runner",
+            "command": "/opt/runners/task-runner-python/.venv/bin/python",
+            "args": ["-m", "src.main"],
+            "health-check-server-port": "5682",
+            "env-overrides": {
+              "PYTHONPATH": "/opt/runners/task-runner-python",
+              "N8N_RUNNERS_STDLIB_ALLOW": "*",
+              "N8N_RUNNERS_EXTERNAL_ALLOW": "*",
+              "N8N_RUNNERS_TASK_TIMEOUT": "120",
+              "N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT": "600"
+            }
+          }
+        ]
+      }

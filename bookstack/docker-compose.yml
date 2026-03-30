@@ -1,0 +1,96 @@
+services:
+  init:
+    image: alpine:3.20
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ${BASE_PATH}/${APP_PATH}:/mnt/app
+    command: >
+      sh -euxc '
+        mkdir -p \
+          /mnt/app/db-data \
+          /mnt/app/config;
+        chown -R 1000:1000 /mnt/app/config;
+        chmod 0700 /mnt/app/config;
+        # MariaDB
+        chown -R 1000:1000 /mnt/app/db-data;
+        chmod 0750 /mnt/app/db-data;
+      '
+
+  bookstack:
+    image: lscr.io/linuxserver/bookstack
+    container_name: bookstack
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - APP_URL=https://${HOST}.${DOMAIN}
+      - DB_HOST=bookstack_db
+      - DB_PORT=3306
+      - DB_USERNAME=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE=${DATABASE}
+      - APP_KEY=base64:FDD1SKks0hF1Mjer994lwf0j30Ipmdft286gezB1+lw=
+      - TZ=${TZ}
+      - AUTH_METHOD=oidc
+      - AUTH_AUTO_INITIATE=true
+      - OIDC_NAME=authentik
+      - OIDC_DISPLAY_NAME_CLAIMS=name
+      - OIDC_CLIENT_ID=d47GkAQ6gPa7FoQxB8IAAuVQ401PeccoNqV5iBxn
+      - OIDC_CLIENT_SECRET=yoBamav63NmwEbL3IpX57DDA1ANgZYrSFHUrJWagWeCwqKBjoLrJKwJ00epnhsc5Ftpj7kUFeSSl4kbe2378PCsT1M2J8Jv4wpPcsuEcl9yvH4pIKGZuabEleBaJ9Cjh
+      - OIDC_ISSUER=https://auth.${DOMAIN}/application/o/docs/
+      - OIDC_ISSUER_DISCOVER=true
+      - OIDC_END_SESSION_ENDPOINT=true
+    volumes:
+      - docs-config:/config
+    restart: unless-stopped
+    depends_on:
+      bookstack_db:
+        condition: service_started
+      init:
+        condition: service_completed_successfully
+    networks:
+      - docs-net
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bookstack.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.bookstack.entrypoints=websecure"
+      - "traefik.http.routers.bookstack.tls.certresolver=letsencrypt-cloudflare"
+      - "traefik.http.services.bookstack.loadbalancer.server.port=80"
+      - "traefik.docker.network=traefik-net"
+
+  bookstack_db:
+    image: mariadb:10.6
+    container_name: bookstack_db
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - MYSQL_ROOT_PASSWORD=wkp$$7K$$FDCL5HWxk
+      - TZ=${TZ}
+      - MYSQL_DATABASE=${DATABASE}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - docs-db-data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - docs-net
+
+volumes:
+  docs-db-data:
+  docs-config:
+
+networks:
+  docs-net:
+  traefik-net:
+    name: traefik-net
+    external: true

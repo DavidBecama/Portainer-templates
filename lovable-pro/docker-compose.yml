@@ -1,0 +1,21 @@
+services:
+  udon-pro:
+    image: ghcr.io/becama-consulting/${IMAGE}:${TAG}
+    environment:
+      TZ: Europe/Madrid
+      # Variable técnica para que Vite acepte peticiones en el contenedor
+      HOST: 0.0.0.0
+    networks:
+      ingress-net:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${APP_PREFIX}.rule=Host(`${URL}`)"
+      - "traefik.http.routers.${APP_PREFIX}.entrypoints=websecure"
+      - "traefik.http.routers.${APP_PREFIX}.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.${APP_PREFIX}.loadbalancer.server.port=8080"
+        
+networks:
+  ingress-net:
+    external: true
+    name: ingress-net
+

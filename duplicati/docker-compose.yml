@@ -1,0 +1,32 @@
+services:
+  duplicati:
+    image: lscr.io/linuxserver/duplicati:latest
+    container_name: duplicati
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=${TZ}
+      - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY}
+      # - CLI_ARGS= #optional
+      - DUPLICATI__WEBSERVICE_PASSWORD=1234
+    volumes:
+      - config:/config
+      - ${DESTINATION_PATH}:/backups
+      - ${SOURCE_PATH}:/source
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.duplicati.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.duplicati.entrypoints=websecure"
+      - "traefik.http.routers.duplicati.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.duplicati.loadbalancer.server.port=8200"
+
+volumes:
+  config:
+
+networks:
+  traefik-net:
+    external: true
+    name: traefik-net

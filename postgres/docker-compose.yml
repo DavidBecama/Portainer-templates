@@ -1,0 +1,37 @@
+services:
+  init:
+    image: alpine:3.20
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/db-data:/mnt/db-data
+    command: >
+      sh -euxc '
+        mkdir -p /mnt/db-data;
+        chown -R 999:999 /mnt/db-data;
+        chmod 0700 /mnt/db-data;
+      '
+
+  postgres:
+    image: postgres:18
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      TZ: ${TZ:-Europe/Madrid}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH}/db-data:/var/lib/postgresql
+    #ports:
+    #  - "5432:5432"
+    shm_size: 128mb
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
