@@ -1,0 +1,54 @@
+# Diun — Docker Image Update Notifier
+# APP_PATH=diun
+
+services:
+
+  diun:
+    image: crazymax/diun:latest
+    container_name: diun
+    command: serve
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Madrid
+      LOG_LEVEL: info
+      DIUN_WATCH_SCHEDULE: "0 9 * * 1"   # Lunes a las 9:00
+      DIUN_WATCH_WORKERS: 10
+      DIUN_WATCH_JITTER: 30s
+      DIUN_PROVIDERS_DOCKER: "true"
+      DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT: "true"
+
+      # --- Elige tu notificador y descomenta ---
+
+      # Telegram
+      # DIUN_NOTIF_TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      # DIUN_NOTIF_TELEGRAM_CHATIDS: ${TELEGRAM_CHAT_ID}
+
+      # Slack
+      # DIUN_NOTIF_SLACK_WEBHOOKURL: ${SLACK_WEBHOOK_URL}
+      # DIUN_NOTIF_SLACK_RENDERFIELDS: "true"
+
+      # Pushover
+      # DIUN_NOTIF_PUSHOVER_TOKEN: ${PUSHOVER_TOKEN}
+      # DIUN_NOTIF_PUSHOVER_RECIPIENT: ${PUSHOVER_USER}
+      # DIUN_NOTIF_PUSHOVER_PRIORITY: 0
+      # DIUN_NOTIF_PUSHOVER_SOUND: pushover
+
+      # Gotify
+      # DIUN_NOTIF_GOTIFY_ENDPOINT: ${GOTIFY_URL}
+      # DIUN_NOTIF_GOTIFY_TOKEN: ${GOTIFY_TOKEN}
+
+      # Webhook genérico (n8n, etc.)
+      # DIUN_NOTIF_WEBHOOK_ENDPOINT: ${WEBHOOK_URL}
+      # DIUN_NOTIF_WEBHOOK_METHOD: POST
+
+      # Email
+      # DIUN_NOTIF_MAIL_HOST: ${SMTP_HOST}
+      # DIUN_NOTIF_MAIL_PORT: 587
+      # DIUN_NOTIF_MAIL_USERNAME: ${SMTP_USER}
+      # DIUN_NOTIF_MAIL_PASSWORD: ${SMTP_PASS}
+      # DIUN_NOTIF_MAIL_FROM: ${SMTP_FROM}
+      # DIUN_NOTIF_MAIL_TO: ${SMTP_TO}
+
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-diun}/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro

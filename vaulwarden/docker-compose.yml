@@ -1,0 +1,58 @@
+# Vaultwarden — Bitwarden compatible server
+# APP_PATH=vaultwarden
+
+services:
+
+  init:
+    image: alpine:latest
+    container_name: vaultwarden-init
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /volumes/data
+        chown -R 1000:1000 /volumes/data
+        echo "Volumes initialized."
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-vaultwarden}/data:/volumes/data
+
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    user: "1000:1000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      DOMAIN: https://${HOST}.${DOMAIN}
+      SIGNUPS_ALLOWED: "false"
+      INVITATIONS_ALLOWED: "true"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN requerido}
+      WEBSOCKET_ENABLED: "true"
+      PUSH_ENABLED: "false"
+      LOG_LEVEL: warn
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-vaultwarden}/data:/data
+    # ports:
+    #   - "8080:80"
+    #   - "3012:3012"
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      # Web vault
+      - "traefik.http.routers.vaultwarden.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.vaultwarden.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.vaultwarden.loadbalancer.server.port=80"
+      # WebSocket para notificaciones
+      - "traefik.http.routers.vaultwarden-ws.rule=Host(`${HOST}.${DOMAIN}`) && Path(`/notifications/hub`)"
+      - "traefik.http.routers.vaultwarden-ws.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden-ws.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.vaultwarden-ws.loadbalancer.server.port=3012"
+
+networks:
+  traefik-net:
+    external: true

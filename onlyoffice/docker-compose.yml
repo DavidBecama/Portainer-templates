@@ -1,0 +1,146 @@
+# OnlyOffice Document Server
+# APP_PATH=onlyoffice
+
+services:
+
+  init:
+    image: alpine:latest
+    container_name: onlyoffice-init
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p \
+          /volumes/data \
+          /volumes/logs \
+          /volumes/fonts \
+          /volumes/postgres \
+          /volumes/rabbitmq \
+          /volumes/valkey
+        chown -R 104:104 /volumes/data /volumes/logs /volumes/fonts
+        chown -R 70:70   /volumes/postgres
+        chown -R 999:999 /volumes/rabbitmq /volumes/valkey
+        echo "Volumes initialized."
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/data:/volumes/data
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/logs:/volumes/logs
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/fonts:/volumes/fonts
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/postgres:/volumes/postgres
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/rabbitmq:/volumes/rabbitmq
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/valkey:/volumes/valkey
+
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: onlyoffice
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-onlyoffice}
+      DB_USER: ${DB_USER:-onlyoffice}
+      DB_PWD: ${DB_PWD:?DB_PWD requerido}
+      AMQP_URI: amqp://${RABBITMQ_USER:-onlyoffice}:${RABBITMQ_PASS:?RABBITMQ_PASS requerido}@rabbitmq:5672
+      REDIS_SERVER_HOST: valkey
+      REDIS_SERVER_PORT: 6379
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/data:/var/www/onlyoffice/Data
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/logs:/var/log/onlyoffice
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/fonts:/usr/share/fonts/truetype/custom
+    # ports:
+    #   - "8880:80"
+    networks:
+      - traefik-net
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.onlyoffice.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.onlyoffice.entrypoints=websecure"
+      - "traefik.http.routers.onlyoffice.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.onlyoffice.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.onlyoffice-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.routers.onlyoffice.middlewares=onlyoffice-headers"
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: onlyoffice-postgres
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${DB_NAME:-onlyoffice}
+      POSTGRES_USER: ${DB_USER:-onlyoffice}
+      POSTGRES_PASSWORD: ${DB_PWD:?DB_PWD requerido}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/postgres:/var/lib/postgresql/data
+    # ports:
+    #   - "5432:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-onlyoffice} -d ${DB_NAME:-onlyoffice}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-alpine
+    container_name: onlyoffice-rabbitmq
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-onlyoffice}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS requerido}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/rabbitmq:/var/lib/rabbitmq
+    # ports:
+    #   - "5672:5672"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: onlyoffice-valkey
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-onlyoffice}/valkey:/data
+    # ports:
+    #   - "6379:6379"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  traefik-net:
+    external: true
+  internal:
+    internal: true

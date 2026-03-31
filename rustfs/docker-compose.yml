@@ -1,0 +1,71 @@
+# RustFS — S3-compatible object storage
+# APP_PATH=rustfs
+
+services:
+
+  init:
+    image: alpine:latest
+    container_name: rustfs-init
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /volumes/data /volumes/logs
+        chown -R 10001:10001 /volumes/data /volumes/logs
+        echo "Volumes initialized."
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-rustfs}/data:/volumes/data
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-rustfs}/logs:/volumes/logs
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      RUSTFS_VOLUMES: /data/rustfs0
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_SERVER_DOMAINS: ${HOST}.${DOMAIN}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?RUSTFS_ACCESS_KEY requerido}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY requerido}
+      RUSTFS_REGION: eu-west-1
+      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-rustfs}/data:/data
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-rustfs}/logs:/app/logs
+    # ports:
+    #   - "9000:9000"
+    #   - "9001:9001"
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      # S3 API
+      - "traefik.http.routers.rustfs-api.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.rustfs-api.entrypoints=websecure"
+      - "traefik.http.routers.rustfs-api.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.rustfs-api.service=rustfs-api-svc"
+      - "traefik.http.services.rustfs-api-svc.loadbalancer.server.port=9000"
+      # Consola web
+      - "traefik.http.routers.rustfs-console.rule=Host(`${HOST_CONSOLE:-console-s3}.${DOMAIN}`)"
+      - "traefik.http.routers.rustfs-console.entrypoints=websecure"
+      - "traefik.http.routers.rustfs-console.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.rustfs-console.service=rustfs-console-svc"
+      - "traefik.http.services.rustfs-console-svc.loadbalancer.server.port=9001"
+
+networks:
+  traefik-net:
+    external: true

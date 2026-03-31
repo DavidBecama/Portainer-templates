@@ -1,0 +1,44 @@
+# CloudBeaver — DBeaver Web
+# APP_PATH=cloudbeaver
+
+services:
+
+  init:
+    image: alpine:latest
+    container_name: cloudbeaver-init
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /volumes/workspace
+        chown -R 8978:8978 /volumes/workspace
+        echo "Volumes initialized."
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-cloudbeaver}/workspace:/volumes/workspace
+
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: cloudbeaver
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      CB_SERVER_URL: https://${HOST}.${DOMAIN}
+    volumes:
+      - ${BASE_PATH:-/root/app-data}/${APP_PATH:-cloudbeaver}/workspace:/opt/cloudbeaver/workspace
+    # ports:
+    #   - "8978:8978"
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cloudbeaver.rule=Host(`${HOST}.${DOMAIN}`)"
+      - "traefik.http.routers.cloudbeaver.entrypoints=websecure"
+      - "traefik.http.routers.cloudbeaver.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.cloudbeaver.loadbalancer.server.port=8978"
+
+networks:
+  traefik-net:
+    external: true
